@@ -6,6 +6,7 @@ import smtplib
 import datetime
 import csv
 import sys
+import time
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from supabase import create_client, Client
@@ -143,12 +144,16 @@ def send_daily_report():
         print(f"Failed to send email: {e}")
 
 def export_database_paginated(table_name):
-    """Export database table to CSV using pagination to avoid timeouts."""
+    """Export database table to CSV using aggressive pagination to avoid timeouts."""
     filename = f"{table_name}_{datetime.datetime.now().strftime('%Y-%m-%d')}.csv"
     
-    # First, try to get a single row to determine the columns
+    # First, try to get columns via a single row
     try:
+        print(f"Determining structure of {table_name}...")
+        
+        # Try to get column names from a single row
         first_row = supabase.table(table_name).select("*").limit(1).execute()
+        
         if not first_row.data:
             print(f"Warning: No data found in table {table_name}")
             # Create empty file with just headers
@@ -159,49 +164,112 @@ def export_database_paginated(table_name):
         
         headers = list(first_row.data[0].keys())
         
+        # Get total count for progress tracking
+        total_count = get_total_rows(table_name)
+        print(f"Total rows to export from {table_name}: {total_count}")
+        
         # Open file and write headers
         with open(filename, "w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(headers)
             
-            # Use pagination to fetch all rows
-            page_size = 500  # Reduced from 1000 to avoid timeouts
+            # Use very small page size for aggressive pagination
+            page_size = 100  # Significantly reduced from 500
             page = 0
+            rows_exported = 0
             more_data = True
             
-            print(f"Exporting {table_name} with pagination (page size: {page_size})...")
+            print(f"Exporting {table_name} with aggressive pagination (page size: {page_size})...")
             
-            while more_data:
-                print(f"Fetching page {page} of {table_name}...")
-                
-                # PostgreSQL uses OFFSET and LIMIT for pagination
-                response = supabase.table(table_name) \
-                                 .select("*") \
-                                 .range(page * page_size, (page + 1) * page_size - 1) \
-                                 .execute()
-                
-                rows = response.data
-                if not rows:
-                    more_data = False
-                else:
-                    # Write this batch of rows
-                    for row in rows:
-                        # Ensure all values are in the same order as headers
-                        row_values = [row.get(header, "") for header in headers]
-                        writer.writerow(row_values)
+            # Try to find a primary key or id field
+            id_field = "id"  # Default
+            if "id" not in headers:
+                # Look for other common primary key names
+                for possible_id in ["uuid", "primary_key", "key", headers[0]]:
+                    if possible_id in headers:
+                        id_field = possible_id
+                        break
+            
+            print(f"Using {id_field} as primary key for pagination")
+            
+            # Use cursor-based pagination instead of offset pagination
+            last_id = None
+            
+            while more_data and rows_exported < total_count:
+                try:
+                    print(f"Fetching batch {page} of {table_name} (rows {rows_exported}/{total_count})...")
                     
-                    # Move to next page
-                    page += 1
+                    # Build query
+                    query = supabase.table(table_name).select("*").limit(page_size)
                     
-                    # If we got fewer rows than requested, we're done
-                    if len(rows) < page_size:
+                    # Add cursor condition if we have a last_id
+                    if last_id is not None:
+                        query = query.gt(id_field, last_id)
+                    
+                    # Order by the id field for consistent pagination
+                    query = query.order(id_field, desc=False)
+                    
+                    # Execute with timeout handling
+                    response = query.execute()
+                    
+                    rows = response.data
+                    if not rows:
                         more_data = False
+                        print("No more data found.")
+                    else:
+                        # Write this batch of rows
+                        for row in rows:
+                            # Ensure all values are in the same order as headers
+                            row_values = [row.get(header, "") for header in headers]
+                            writer.writerow(row_values)
+                        
+                        # Keep track of the last ID for cursor pagination
+                        last_id = rows[-1].get(id_field)
+                        
+                        # Update counters
+                        rows_exported += len(rows)
+                        page += 1
+                        
+                        # Progress update
+                        progress_percent = (rows_exported / total_count) * 100
+                        print(f"Progress: {rows_exported}/{total_count} rows ({progress_percent:.1f}%)")
+                        
+                        # Add a small delay between requests to reduce database load
+                        if more_data:
+                            print("Pausing briefly to avoid database overload...")
+                            time.sleep(1)  # 1 second delay between batches
+                
+                except Exception as e:
+                    # If an individual batch fails, log it but continue with the next one
+                    print(f"Error fetching batch {page}: {e}")
+                    
+                    # If we've already got some data, try to continue with the next batch
+                    if rows_exported > 0:
+                        page += 1
+                        if last_id is not None:
+                            print(f"Continuing from ID: {last_id}")
+                        else:
+                            # Without a valid cursor, we need to skip ahead
+                            # This is not ideal but at least gets some data
+                            last_id = f"approximate_batch_{page}"
+                            print(f"Cannot continue properly, attempting to skip ahead.")
+                    else:
+                        # If we haven't got any data yet, this is a fatal error
+                        raise
         
-        print(f"Exported {table_name} successfully!")
+        print(f"Exported {rows_exported} rows from {table_name} successfully!")
         return filename
         
     except Exception as e:
         print(f"Error exporting {table_name}: {e}")
+        
+        # If we have a partial file, note that in the filename
+        if os.path.exists(filename):
+            partial_filename = f"{table_name}_{datetime.datetime.now().strftime('%Y-%m-%d')}_PARTIAL.csv"
+            os.rename(filename, partial_filename)
+            print(f"Saved partial data to {partial_filename}")
+            return partial_filename
+            
         raise
 
 def upload_to_drive(filename, folder_id=None):
