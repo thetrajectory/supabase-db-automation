@@ -2,9 +2,9 @@ name: Supabase Automation
 
 on:
   schedule:
-    # Daily report at 11:59 PM
+    # Daily report at 11:30 PM IST (6:00 PM UTC)
     - cron: '0 18 * * *'
-    # Weekly backup on Friday at 11:00 AM
+    # Weekly backup on Friday at 11:30 PM IST (6:00 PM UTC)
     - cron: '0 18 * * 5'
   workflow_dispatch:  # Allow manual triggering
 
@@ -12,7 +12,7 @@ jobs:
   daily_report:
     name: Generate Daily Report
     runs-on: ubuntu-latest
-    if: github.event.schedule != '0 18 * * 5'  # Run if not the weekly backup time
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.event.schedule == '0 18 * * *')
     
     steps:
       - name: Checkout code
@@ -40,7 +40,7 @@ jobs:
   weekly_backup:
     name: Create Weekly Backup
     runs-on: ubuntu-latest
-    if: github.event.schedule == '0 18 * * 5'  # Run only on Friday at 11 AM
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.event.schedule == '0 18 * * 5')
     
     steps:
       - name: Checkout code
