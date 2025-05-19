@@ -311,6 +311,9 @@ def weekly_backup():
     """Create weekly backups and upload to Google Drive."""
     print("Starting weekly backup...")
     
+    # Get the folder ID from environment variable
+    folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
+    
     try:
         print("Exporting leads_db...")
         leads_file = export_database_paginated("leads_db")
@@ -320,12 +323,12 @@ def weekly_backup():
         orgs_file = export_database_paginated("orgs_db")
         print(f"Successfully exported orgs_db to {orgs_file}")
         
-        # Upload to Google Drive
+        # Upload to Google Drive with the specified folder ID
         print("Uploading leads_db to Google Drive...")
-        upload_to_drive(leads_file)
+        upload_to_drive(leads_file, folder_id)
         
         print("Uploading orgs_db to Google Drive...")
-        upload_to_drive(orgs_file)
+        upload_to_drive(orgs_file, folder_id)
         
         print("Weekly backup completed successfully!")
     except Exception as e:
