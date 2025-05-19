@@ -28,31 +28,26 @@ def get_total_rows(table_name):
     response = supabase.table(table_name).select("count", count="exact").execute()
     return response.count
 
-def get_calls_made_today():
-    """Get total calls made today (assuming you have a calls table with timestamp)."""
-    today = datetime.datetime.now().strftime("%Y-%m-%d")
-    response = supabase.table("calls").select("count", count="exact").eq("date", today).execute()
-    return response.count
-
-def get_apollo_credits_saved():
-    """Get total Apollo credits saved from Supabase."""
-    response = supabase.table("apollo_credits").select("total").execute()
-    if response.data:
-        return response.data[0]["total"]
-    return 0
-
 def get_new_rows_today(table_name):
-    """Get count of new rows added today."""
+    """Get count of new rows added today (assuming there's a created_at column)."""
     today = datetime.datetime.now().strftime("%Y-%m-%d")
-    response = supabase.table(table_name).select("count", count="exact").gte("created_at", today).execute()
-    return response.count
+    try:
+        # Try with created_at column first
+        response = supabase.table(table_name).select("count", count="exact").gte("created_at", today).execute()
+        return response.count
+    except Exception:
+        try:
+            # Try with a different timestamp column if created_at doesn't exist
+            response = supabase.table(table_name).select("count", count="exact").gte("timestamp", today).execute()
+            return response.count
+        except Exception:
+            print(f"Warning: Could not find timestamp column in {table_name}. Returning 0.")
+            return 0
 
 def send_daily_report():
     """Generate and send daily report via email."""
     leads_total = get_total_rows("leads_db")
     orgs_total = get_total_rows("orgs_db")
-    calls_today = get_calls_made_today()
-    apollo_credits = get_apollo_credits_saved()
     new_leads_today = get_new_rows_today("leads_db")
     new_orgs_today = get_new_rows_today("orgs_db")
     
@@ -66,15 +61,20 @@ def send_daily_report():
     <html>
       <body>
         <h2>Supabase Daily Report</h2>
-        <h3>Database Stats:</h3>
+        
+        <h3>Leads Database Report:</h3>
         <ul>
-          <li>Total Leads: {leads_total}</li>
-          <li>Total Organizations: {orgs_total}</li>
-          <li>Total Calls Made Today: {calls_today}</li>
-          <li>Total Apollo Credits Saved: {apollo_credits}</li>
-          <li>New Leads Added Today: {new_leads_today}</li>
-          <li>New Organizations Added Today: {new_orgs_today}</li>
+          <li>Total Rows: {leads_total}</li>
+          <li>New Rows Added Today: {new_leads_today}</li>
         </ul>
+        
+        <h3>Organizations Database Report:</h3>
+        <ul>
+          <li>Total Rows: {orgs_total}</li>
+          <li>New Rows Added Today: {new_orgs_today}</li>
+        </ul>
+        
+        <p>This report was automatically generated at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} UTC.</p>
       </body>
     </html>
     """
