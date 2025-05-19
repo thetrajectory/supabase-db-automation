@@ -96,10 +96,6 @@ def send_daily_report():
     new_leads_today = get_new_rows_today("leads_db")
     new_orgs_today = get_new_rows_today("orgs_db")
     
-    # Get request counts
-    leads_requests = get_request_count("leads_db")
-    orgs_requests = get_request_count("orgs_db")
-    
     # Create email
     msg = MIMEMultipart()
     msg["From"] = gmail_user
@@ -115,14 +111,12 @@ def send_daily_report():
         <ul>
           <li>Total Rows: {leads_total}</li>
           <li>New Rows Added Today: {new_leads_today}</li>
-          <li>Fetch/Get Requests Today: {leads_requests}</li>
         </ul>
         
         <h3>Organizations Database Report:</h3>
         <ul>
           <li>Total Rows: {orgs_total}</li>
           <li>New Rows Added Today: {new_orgs_today}</li>
-          <li>Fetch/Get Requests Today: {orgs_requests}</li>
         </ul>
         
         <p>This report was automatically generated at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} UTC.</p>
